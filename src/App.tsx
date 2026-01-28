@@ -3,7 +3,12 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Index from "./pages/Index";
+import { MainLayout } from "./components/layout/MainLayout";
+import Overview from "./pages/Overview";
+import WalletAnalyzer from "./pages/WalletAnalyzer";
+import PhishingDetection from "./pages/PhishingDetection";
+import TransactionMonitor from "./pages/TransactionMonitor";
+import AIModelInfo from "./pages/AIModelInfo";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -15,8 +20,13 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route element={<MainLayout />}>
+            <Route path="/" element={<Overview />} />
+            <Route path="/wallet" element={<WalletAnalyzer />} />
+            <Route path="/phishing" element={<PhishingDetection />} />
+            <Route path="/transactions" element={<TransactionMonitor />} />
+            <Route path="/ai-info" element={<AIModelInfo />} />
+          </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
