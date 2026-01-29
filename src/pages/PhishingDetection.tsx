@@ -8,13 +8,16 @@ import {
   ExternalLink,
   Clock,
   Users,
-  TrendingUp
+  TrendingUp,
+  Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AlertCard } from "@/components/dashboard/AlertCard";
+import { ScanResult, ThreatLevel } from "@/components/phishing/ScanResult";
+import { scanAddress } from "@/lib/phishing-scanner";
 import { cn } from "@/lib/utils";
-
+import { toast } from "@/hooks/use-toast";
 const knownPhishingPatterns = [
   {
     pattern: "Rapid small transactions",
@@ -75,7 +78,52 @@ const stats = [
 
 export default function PhishingDetection() {
   const [searchAddress, setSearchAddress] = useState("");
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<{
+    address: string;
+    threatLevel: ThreatLevel;
+    threats: string[];
+  } | null>(null);
 
+  const handleScan = async () => {
+    if (!searchAddress.trim()) {
+      toast({
+        title: "Address Required",
+        description: "Please enter an address or contract to scan.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsScanning(true);
+    setScanResult(null);
+
+    try {
+      const result = await scanAddress(searchAddress);
+      setScanResult({
+        address: searchAddress,
+        ...result,
+      });
+      
+      toast({
+        title: "Scan Complete",
+        description: `Threat level: ${result.threatLevel.toUpperCase()}`,
+      });
+    } catch (error) {
+      toast({
+        title: "Scan Failed",
+        description: "Unable to complete the threat scan. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleClearResult = () => {
+    setScanResult(null);
+    setSearchAddress("");
+  };
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Header */}
@@ -114,15 +162,30 @@ export default function PhishingDetection() {
             placeholder="Enter address or contract to check..."
             value={searchAddress}
             onChange={(e) => setSearchAddress(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleScan()}
             className="flex-1"
+            disabled={isScanning}
           />
-          <Button>
-            <Shield className="h-4 w-4" />
-            Scan for Threats
+          <Button onClick={handleScan} disabled={isScanning}>
+            {isScanning ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Shield className="h-4 w-4" />
+            )}
+            {isScanning ? "Scanning..." : "Scan for Threats"}
           </Button>
         </div>
       </div>
 
+      {/* Scan Result */}
+      {scanResult && (
+        <ScanResult
+          address={scanResult.address}
+          threatLevel={scanResult.threatLevel}
+          threats={scanResult.threats}
+          onClose={handleClearResult}
+        />
+      )}
       {/* Main Grid */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Known Patterns */}
