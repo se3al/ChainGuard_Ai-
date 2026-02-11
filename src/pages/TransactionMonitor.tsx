@@ -12,6 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { TransactionItem } from "@/components/dashboard/TransactionItem";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 const generateTransaction = (id: number) => {
   const types = ["incoming", "outgoing"] as const;
@@ -41,6 +43,7 @@ const initialTransactions = Array.from({ length: 8 }, (_, i) => ({
 }));
 
 export default function TransactionMonitor() {
+  const { user } = useAuth();
   const [transactions, setTransactions] = useState(initialTransactions);
   const [isLive, setIsLive] = useState(true);
   const [filter, setFilter] = useState<"all" | "low" | "medium" | "high">("all");
@@ -54,14 +57,27 @@ export default function TransactionMonitor() {
     if (!isLive) return;
 
     const interval = setInterval(() => {
+      const newTx = generateTransaction(Date.now());
+      
       setTransactions((prev) => {
-        const newTx = generateTransaction(Date.now());
         const updated = [newTx, ...prev.slice(0, 9)].map((tx, i) => ({
           ...tx,
           timestamp: i === 0 ? "Just now" : `${i * 2} min ago`,
         }));
         return updated;
       });
+
+      // Save to database
+      if (user) {
+        supabase.from("transaction_logs").insert({
+          user_id: user.id,
+          transaction_hash: newTx.hash,
+          from_address: newTx.from,
+          to_address: newTx.to,
+          amount: newTx.amount,
+          risk_level: newTx.risk,
+        }).then(() => {});
+      }
 
       setStats((prev) => ({
         total: prev.total + 1,
@@ -71,7 +87,7 @@ export default function TransactionMonitor() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [isLive]);
+  }, [isLive, user]);
 
   const filteredTransactions = transactions.filter(
     (tx) => filter === "all" || tx.risk === filter
