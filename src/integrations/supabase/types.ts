@@ -14,7 +14,90 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          email: string | null
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      scan_history: {
+        Row: {
+          address_scanned: string
+          id: string
+          scanned_at: string
+          threat_level: string
+          threats_found: string[] | null
+          user_id: string
+        }
+        Insert: {
+          address_scanned: string
+          id?: string
+          scanned_at?: string
+          threat_level: string
+          threats_found?: string[] | null
+          user_id: string
+        }
+        Update: {
+          address_scanned?: string
+          id?: string
+          scanned_at?: string
+          threat_level?: string
+          threats_found?: string[] | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      transaction_logs: {
+        Row: {
+          amount: string
+          from_address: string
+          id: string
+          logged_at: string
+          risk_level: string
+          to_address: string
+          transaction_hash: string
+          user_id: string
+        }
+        Insert: {
+          amount: string
+          from_address: string
+          id?: string
+          logged_at?: string
+          risk_level?: string
+          to_address: string
+          transaction_hash: string
+          user_id: string
+        }
+        Update: {
+          amount?: string
+          from_address?: string
+          id?: string
+          logged_at?: string
+          risk_level?: string
+          to_address?: string
+          transaction_hash?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

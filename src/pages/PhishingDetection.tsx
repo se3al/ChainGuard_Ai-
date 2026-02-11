@@ -18,6 +18,8 @@ import { ScanResult, ThreatLevel } from "@/components/phishing/ScanResult";
 import { scanAddress } from "@/lib/phishing-scanner";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 const knownPhishingPatterns = [
   {
     pattern: "Rapid small transactions",
@@ -77,6 +79,7 @@ const stats = [
 ];
 
 export default function PhishingDetection() {
+  const { user } = useAuth();
   const [searchAddress, setSearchAddress] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{
@@ -104,6 +107,16 @@ export default function PhishingDetection() {
         address: searchAddress,
         ...result,
       });
+
+      // Save to scan history
+      if (user) {
+        await supabase.from("scan_history").insert({
+          user_id: user.id,
+          address_scanned: searchAddress,
+          threat_level: result.threatLevel,
+          threats_found: result.threats,
+        });
+      }
       
       toast({
         title: "Scan Complete",
