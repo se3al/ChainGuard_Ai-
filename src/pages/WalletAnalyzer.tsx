@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, Wallet, Shield, AlertTriangle, Activity, Clock, ExternalLink, Loader2 } from "lucide-react";
+import { Search, Wallet, Shield, AlertTriangle, Activity, Clock, ExternalLink, Loader2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RiskBadge } from "@/components/dashboard/RiskBadge";
@@ -17,96 +17,136 @@ interface AnalysisResult {
   transactionCount: number;
   firstSeen: string;
   balance: string;
+  isRealData: boolean;
 }
 
-/**
- * Deterministic hash: address + seed → number 0–1
- */
-function addrHash(address: string, seed = 0): number {
-  let hash = seed * 31;
-  for (let i = 0; i < address.length; i++) {
-    hash = (hash * 31 + address.charCodeAt(i)) >>> 0;
-  }
-  return (hash % 10000) / 10000;
-}
+const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-const walletAgeOptions = ["3 months ago", "8 months ago", "1+ year ago", "2+ years ago", "3+ years ago"];
-const firstSeenOptions = ["November 2024", "April 2024", "September 2023", "March 2022", "July 2021", "January 2020"];
-const contractOptions = ["All verified contracts", "Mostly verified (2 unverified)", "Several unverified contracts", "Multiple high-risk contracts"];
-const associationOptions = ["No flagged address interactions", "1 flagged address interaction", "3 flagged address interactions", "Multiple known bad actors"];
-const fundSourceOptions = ["Legitimate exchanges only", "Mix of CEX and DEX", "Includes privacy mixer activity", "Unverifiable fund origins"];
-const txPatternOptions = ["Normal transaction frequency", "Unusual frequency detected", "Burst pattern - possible bot", "High-volume wash trading signals"];
+async function fetchWalletData(address: string): Promise<AnalysisResult> {
+  const response = await fetch(
+    `https://${projectId}.supabase.co/functions/v1/etherscan-proxy`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+      },
+      body: JSON.stringify({ address, action: "wallet" }),
+    }
+  );
 
-function generateAnalysis(address: string): AnalysisResult {
-  const h = (seed: number) => addrHash(address, seed);
+  if (!response.ok) throw new Error(`Edge function error: ${response.status}`);
+  const data = await response.json();
 
-  const walletAgeStatus = h(1) > 0.6 ? "safe" : h(1) > 0.3 ? "warning" : "danger";
-  const txPatternStatus = h(2) > 0.55 ? "safe" : h(2) > 0.25 ? "warning" : "danger";
-  const contractStatus = h(3) > 0.65 ? "safe" : h(3) > 0.35 ? "warning" : "danger";
-  const associationStatus = h(4) > 0.7 ? "safe" : h(4) > 0.4 ? "warning" : "danger";
-  const fundStatus = h(5) > 0.6 ? "safe" : h(5) > 0.3 ? "warning" : "danger";
+  const { balance, firstSeen, transactionCount, recentTxs = [], isNewWallet } = data;
 
-  const factors = [
-    {
-      label: "Wallet Age",
-      status: walletAgeStatus as "safe" | "warning" | "danger",
-      detail: walletAgeOptions[Math.floor(h(6) * walletAgeOptions.length)],
-    },
-    {
-      label: "Transaction Pattern",
-      status: txPatternStatus as "safe" | "warning" | "danger",
-      detail: txPatternOptions[Math.floor(h(7) * txPatternOptions.length)],
-    },
-    {
-      label: "Connected Contracts",
-      status: contractStatus as "safe" | "warning" | "danger",
-      detail: contractOptions[Math.floor(h(8) * contractOptions.length)],
-    },
-    {
-      label: "Known Associations",
-      status: associationStatus as "safe" | "warning" | "danger",
-      detail: associationOptions[Math.floor(h(9) * associationOptions.length)],
-    },
-    {
-      label: "Fund Sources",
-      status: fundStatus as "safe" | "warning" | "danger",
-      detail: fundSourceOptions[Math.floor(h(10) * fundSourceOptions.length)],
-    },
-  ];
+  // Derive risk factors from real data
+  const factors: AnalysisResult["factors"] = [];
 
-  const dangerCount = factors.filter(f => f.status === "danger").length;
-  const warningCount = factors.filter(f => f.status === "warning").length;
-  const riskScore = Math.round(20 + h(11) * 15 + warningCount * 12 + dangerCount * 18);
-  const clampedScore = Math.min(Math.max(riskScore, 5), 98);
+  // Factor 1: Wallet age
+  const isOldWallet = firstSeen !== "Unknown" && !firstSeen.includes("2024") && !firstSeen.includes("2025");
+  factors.push({
+    label: "Wallet Age",
+    status: isNewWallet ? "danger" : isOldWallet ? "safe" : "warning",
+    detail: isNewWallet ? "No transaction history (brand new wallet)" : `First activity: ${firstSeen}`,
+  });
+
+  // Factor 2: Transaction volume
+  factors.push({
+    label: "Transaction Volume",
+    status: transactionCount > 500 ? "safe" : transactionCount > 50 ? "warning" : "danger",
+    detail:
+      transactionCount === 0
+        ? "No transactions found"
+        : `${transactionCount.toLocaleString()} total transactions`,
+  });
+
+  // Factor 3: Failed transactions
+  const failedTxs = recentTxs.filter((tx: Record<string, string>) => tx.isError === "1");
+  const failRate = recentTxs.length > 0 ? failedTxs.length / recentTxs.length : 0;
+  factors.push({
+    label: "Transaction Success Rate",
+    status: failRate > 0.3 ? "danger" : failRate > 0.1 ? "warning" : "safe",
+    detail:
+      recentTxs.length === 0
+        ? "No recent transactions to evaluate"
+        : failRate === 0
+        ? "All recent transactions successful"
+        : `${(failRate * 100).toFixed(0)}% failure rate in recent transactions`,
+  });
+
+  // Factor 4: Balance relative to activity
+  const balanceNum = parseFloat(balance);
+  factors.push({
+    label: "Balance",
+    status: balanceNum > 0.01 ? "safe" : "warning",
+    detail: balance === "0.0000 ETH" ? "Empty wallet" : balance,
+  });
+
+  // Factor 5: Contract interactions (from recent txs)
+  const contractInteractions = recentTxs.filter(
+    (tx: Record<string, string>) => tx.input && tx.input !== "0x"
+  ).length;
+  factors.push({
+    label: "Contract Interactions",
+    status:
+      contractInteractions > 10 ? "warning" : contractInteractions > 0 ? "safe" : "safe",
+    detail:
+      recentTxs.length === 0
+        ? "No recent transactions"
+        : `${contractInteractions} contract calls in recent transactions`,
+  });
+
+  // Calculate risk score from factors
+  const dangerCount = factors.filter((f) => f.status === "danger").length;
+  const warningCount = factors.filter((f) => f.status === "warning").length;
+  let riskScore = 15 + dangerCount * 20 + warningCount * 10;
+  if (isNewWallet) riskScore += 15;
+  riskScore = Math.min(Math.max(riskScore, 5), 98);
 
   const riskLevel: "low" | "medium" | "high" =
-    clampedScore >= 70 ? "high" : clampedScore >= 40 ? "medium" : "low";
+    riskScore >= 70 ? "high" : riskScore >= 35 ? "medium" : "low";
 
-  const transactionCount = Math.floor(50 + h(12) * 9950);
-  const firstSeen = firstSeenOptions[Math.floor(h(13) * firstSeenOptions.length)];
-  const balance = (h(14) * 120).toFixed(2) + " ETH";
-
-  return { address, riskLevel, riskScore: clampedScore, factors, transactionCount, firstSeen, balance };
+  return {
+    address,
+    riskLevel,
+    riskScore,
+    factors,
+    transactionCount,
+    firstSeen: firstSeen || "Unknown",
+    balance,
+    isRealData: true,
+  };
 }
 
 export default function WalletAnalyzer() {
   const [address, setAddress] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleAnalyze = async () => {
     if (!address) return;
-    
     setIsAnalyzing(true);
-    // Simulate AI analysis delay
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setResult(generateAnalysis(address));
-    setIsAnalyzing(false);
+    setResult(null);
+    setError(null);
+
+    try {
+      const analysis = await fetchWalletData(address);
+      setResult(analysis);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to fetch on-chain data. Please check the address and try again.");
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const getScoreColor = (score: number) => {
-    if (score >= 80) return "text-success";
-    if (score >= 50) return "text-warning";
+    if (score < 35) return "text-success";
+    if (score < 70) return "text-warning";
     return "text-destructive";
   };
 
@@ -118,7 +158,7 @@ export default function WalletAnalyzer() {
           Wallet <span className="gradient-text">Risk Analyzer</span>
         </h1>
         <p className="text-muted-foreground mt-2">
-          AI-powered wallet risk assessment and threat detection
+          Real-time on-chain risk assessment powered by Etherscan
         </p>
       </div>
 
@@ -131,6 +171,7 @@ export default function WalletAnalyzer() {
               placeholder="Enter wallet address (0x...)"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAnalyze()}
               className="pl-10"
             />
           </div>
@@ -152,11 +193,24 @@ export default function WalletAnalyzer() {
             )}
           </Button>
         </div>
+
+        {error && (
+          <p className="mt-3 text-sm text-destructive flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            {error}
+          </p>
+        )}
       </div>
 
       {/* Analysis Result */}
       {result && (
         <div className="space-y-6 animate-fade-in">
+          {/* Real data badge */}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Info className="h-3.5 w-3.5" />
+            Live data fetched from Etherscan
+          </div>
+
           {/* Risk Overview */}
           <div className="glass-card p-6">
             <div className="flex flex-col lg:flex-row lg:items-center gap-6">
@@ -181,10 +235,7 @@ export default function WalletAnalyzer() {
                     fill="none"
                     strokeDasharray={`${result.riskScore * 2.83} 283`}
                     strokeLinecap="round"
-                    className={cn(
-                      "transition-all duration-1000",
-                      getScoreColor(result.riskScore)
-                    )}
+                    className={cn("transition-all duration-1000", getScoreColor(result.riskScore))}
                   />
                 </svg>
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -201,9 +252,15 @@ export default function WalletAnalyzer() {
               <div className="flex-1 space-y-4">
                 <div className="flex items-center gap-3 flex-wrap">
                   <RiskBadge level={result.riskLevel} size="lg" />
-                  <Button variant="ghost" size="sm" className="font-mono text-xs">
-                    {result.address.slice(0, 10)}...{result.address.slice(-8)}
-                    <ExternalLink className="h-3 w-3 ml-1" />
+                  <Button variant="ghost" size="sm" className="font-mono text-xs" asChild>
+                    <a
+                      href={`https://etherscan.io/address/${result.address}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {result.address.slice(0, 10)}...{result.address.slice(-8)}
+                      <ExternalLink className="h-3 w-3 ml-1" />
+                    </a>
                   </Button>
                 </div>
 
@@ -213,7 +270,9 @@ export default function WalletAnalyzer() {
                       <Activity className="h-4 w-4" />
                       Transactions
                     </div>
-                    <p className="text-xl font-bold mt-1">{result.transactionCount.toLocaleString()}</p>
+                    <p className="text-xl font-bold mt-1">
+                      {result.transactionCount.toLocaleString()}
+                    </p>
                   </div>
                   <div className="p-3 rounded-lg bg-secondary/30">
                     <div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -238,7 +297,7 @@ export default function WalletAnalyzer() {
           <div className="glass-card p-6">
             <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Shield className="h-5 w-5 text-primary" />
-              AI Risk Analysis
+              On-Chain Risk Analysis
             </h3>
             <div className="space-y-3">
               {result.factors.map((factor, index) => (
@@ -249,7 +308,7 @@ export default function WalletAnalyzer() {
                 >
                   <div
                     className={cn(
-                      "w-3 h-3 rounded-full",
+                      "w-3 h-3 rounded-full shrink-0",
                       factor.status === "safe" && "bg-success",
                       factor.status === "warning" && "bg-warning",
                       factor.status === "danger" && "bg-destructive"
@@ -261,7 +320,7 @@ export default function WalletAnalyzer() {
                   </div>
                   <div
                     className={cn(
-                      "px-2 py-0.5 rounded text-xs font-medium",
+                      "px-2 py-0.5 rounded text-xs font-medium shrink-0",
                       factor.status === "safe" && "bg-success/10 text-success",
                       factor.status === "warning" && "bg-warning/10 text-warning",
                       factor.status === "danger" && "bg-destructive/10 text-destructive"
@@ -277,7 +336,7 @@ export default function WalletAnalyzer() {
       )}
 
       {/* Empty State */}
-      {!result && !isAnalyzing && (
+      {!result && !isAnalyzing && !error && (
         <div className="glass-card p-12 text-center">
           <div className="relative inline-block">
             <Wallet className="h-16 w-16 text-muted-foreground mx-auto" />
@@ -285,8 +344,8 @@ export default function WalletAnalyzer() {
           </div>
           <h3 className="text-xl font-semibold mt-6">Enter a Wallet Address</h3>
           <p className="text-muted-foreground mt-2 max-w-md mx-auto">
-            Our AI model analyzes wallet behavior, transaction patterns, and network
-            associations to assess risk levels.
+            Analyzes real on-chain data — balance, transaction history, failure rates, and
+            contract interactions via Etherscan.
           </p>
         </div>
       )}
