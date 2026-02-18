@@ -100,7 +100,7 @@ export default function AIModelInfo() {
             <Sparkles className="absolute -top-2 -right-2 h-6 w-6 text-warning animate-pulse" />
           </div>
           <div className="text-center lg:text-left">
-            <h2 className="text-2xl font-bold mb-2">ChainGuard Neural Engine v3.2</h2>
+            <h2 className="text-2xl font-bold mb-2">ChainGuard Neural Engine</h2>
             <p className="text-muted-foreground max-w-xl">
               State-of-the-art ensemble model combining transformer architectures with 
               gradient boosting for comprehensive blockchain security analysis.
