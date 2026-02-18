@@ -19,21 +19,75 @@ interface AnalysisResult {
   balance: string;
 }
 
-const mockAnalysis: AnalysisResult = {
-  address: "0x742d35Cc6634C0532925a3b844Bc9e7595f3e0Ab",
-  riskLevel: "medium",
-  riskScore: 62,
-  factors: [
-    { label: "Wallet Age", status: "safe", detail: "Created 2+ years ago" },
-    { label: "Transaction Pattern", status: "warning", detail: "Unusual frequency detected" },
-    { label: "Connected Contracts", status: "safe", detail: "All verified contracts" },
-    { label: "Known Associations", status: "danger", detail: "1 flagged address interaction" },
-    { label: "Fund Sources", status: "safe", detail: "Legitimate exchanges only" },
-  ],
-  transactionCount: 1247,
-  firstSeen: "March 2022",
-  balance: "24.85 ETH",
-};
+/**
+ * Deterministic hash: address + seed → number 0–1
+ */
+function addrHash(address: string, seed = 0): number {
+  let hash = seed * 31;
+  for (let i = 0; i < address.length; i++) {
+    hash = (hash * 31 + address.charCodeAt(i)) >>> 0;
+  }
+  return (hash % 10000) / 10000;
+}
+
+const walletAgeOptions = ["3 months ago", "8 months ago", "1+ year ago", "2+ years ago", "3+ years ago"];
+const firstSeenOptions = ["November 2024", "April 2024", "September 2023", "March 2022", "July 2021", "January 2020"];
+const contractOptions = ["All verified contracts", "Mostly verified (2 unverified)", "Several unverified contracts", "Multiple high-risk contracts"];
+const associationOptions = ["No flagged address interactions", "1 flagged address interaction", "3 flagged address interactions", "Multiple known bad actors"];
+const fundSourceOptions = ["Legitimate exchanges only", "Mix of CEX and DEX", "Includes privacy mixer activity", "Unverifiable fund origins"];
+const txPatternOptions = ["Normal transaction frequency", "Unusual frequency detected", "Burst pattern - possible bot", "High-volume wash trading signals"];
+
+function generateAnalysis(address: string): AnalysisResult {
+  const h = (seed: number) => addrHash(address, seed);
+
+  const walletAgeStatus = h(1) > 0.6 ? "safe" : h(1) > 0.3 ? "warning" : "danger";
+  const txPatternStatus = h(2) > 0.55 ? "safe" : h(2) > 0.25 ? "warning" : "danger";
+  const contractStatus = h(3) > 0.65 ? "safe" : h(3) > 0.35 ? "warning" : "danger";
+  const associationStatus = h(4) > 0.7 ? "safe" : h(4) > 0.4 ? "warning" : "danger";
+  const fundStatus = h(5) > 0.6 ? "safe" : h(5) > 0.3 ? "warning" : "danger";
+
+  const factors = [
+    {
+      label: "Wallet Age",
+      status: walletAgeStatus as "safe" | "warning" | "danger",
+      detail: walletAgeOptions[Math.floor(h(6) * walletAgeOptions.length)],
+    },
+    {
+      label: "Transaction Pattern",
+      status: txPatternStatus as "safe" | "warning" | "danger",
+      detail: txPatternOptions[Math.floor(h(7) * txPatternOptions.length)],
+    },
+    {
+      label: "Connected Contracts",
+      status: contractStatus as "safe" | "warning" | "danger",
+      detail: contractOptions[Math.floor(h(8) * contractOptions.length)],
+    },
+    {
+      label: "Known Associations",
+      status: associationStatus as "safe" | "warning" | "danger",
+      detail: associationOptions[Math.floor(h(9) * associationOptions.length)],
+    },
+    {
+      label: "Fund Sources",
+      status: fundStatus as "safe" | "warning" | "danger",
+      detail: fundSourceOptions[Math.floor(h(10) * fundSourceOptions.length)],
+    },
+  ];
+
+  const dangerCount = factors.filter(f => f.status === "danger").length;
+  const warningCount = factors.filter(f => f.status === "warning").length;
+  const riskScore = Math.round(20 + h(11) * 15 + warningCount * 12 + dangerCount * 18);
+  const clampedScore = Math.min(Math.max(riskScore, 5), 98);
+
+  const riskLevel: "low" | "medium" | "high" =
+    clampedScore >= 70 ? "high" : clampedScore >= 40 ? "medium" : "low";
+
+  const transactionCount = Math.floor(50 + h(12) * 9950);
+  const firstSeen = firstSeenOptions[Math.floor(h(13) * firstSeenOptions.length)];
+  const balance = (h(14) * 120).toFixed(2) + " ETH";
+
+  return { address, riskLevel, riskScore: clampedScore, factors, transactionCount, firstSeen, balance };
+}
 
 export default function WalletAnalyzer() {
   const [address, setAddress] = useState("");
@@ -44,9 +98,9 @@ export default function WalletAnalyzer() {
     if (!address) return;
     
     setIsAnalyzing(true);
-    // Simulate AI analysis
+    // Simulate AI analysis delay
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    setResult({ ...mockAnalysis, address });
+    setResult(generateAnalysis(address));
     setIsAnalyzing(false);
   };
 
